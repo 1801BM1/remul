@@ -1,0 +1,163 @@
+#_________________________________________________________________________________________
+#
+# Для строчных переменных которые далее будут конкатенированы не допускается 
+# использование комментария после определения - это добавляет разделитель после строки
+#
+#
+# Для построения проекта с отладкой:  GLB_DEBUG = 1
+# Для построения проекта без отладки: GLB_DEBUG = 0
+#
+# Добавлена возможность ответа РЕ-мулятора не на все 8К адресного диапазона микросхемы
+# а на определенное окно, ограниченное константами GLB_WINLOW и GLB_WINHIGH, при этом
+# константа GLB_WINADR должна иметь ненулевое значение
+#
+# Пример для работы в окне 173000..1733777, следует отвечать в интервале адресов
+# 13000..13777 (0x1600..0x1800), используется для создания ПЗУ с образом dwboot.bin
+#
+# GLB_WINADR	= 1
+# GLB_WINLOW    = 0x1600
+# GLB_WINGIGH   = 0x1800
+#
+SHELL		= cmd.exe
+GLB_DEBUG	= 0
+GLB_WINADR	= 0
+GLB_WINLOW    	= 0x1600
+GLB_WINGIGH   	= 0x1800
+
+ifeq ($(GLB_DEBUG), 0)
+TMP             = .\tmp_iar\release
+else
+TMP             = .\tmp_iar\debug
+endif
+
+#_________________________________________________________________________________________
+#
+# Различные сообщения
+#
+MSG_AS		= as:
+MSG_CC		= cc:
+MSG_LD		= ld:
+MSG_CD		= cd:
+MSG_TX		= tx:
+MSG_HT		= ht:
+
+#_________________________________________________________________________________________
+#
+# Пути к используемым инструментам
+#
+UTIL_PATH	= D:\ECC\UTIL
+TOOL_PATH	= D:\ECC\IAR\ARM541
+TOOL_PATH_INC	= $(TOOL_PATH)\inc
+TOOL_LIB	= $(TOOL_PATH)\lib\rt7M_tl.a 
+
+AS    		= $(TOOL_PATH)\bin\iasmarm.exe
+CC       	= $(TOOL_PATH)\bin\iccarm
+LD    		= $(TOOL_PATH)\bin\ilinkarm.exe
+LB		= $(TOOL_PATH)\bin\iarchive.exe
+RM		= del
+
+IELF		= $(UTIL_PATH)\ielfhex.exe
+TX     		= $(UTIL_PATH)\atxt32.exe
+SREC		= $(UTIL_PATH)\srec_cat.exe
+
+#_________________________________________________________________________________________
+#
+# Общие используемые переменные
+# 
+INC		= -I$(TOOL_PATH_INC)
+
+AFLAGS 		= -S --cpu Cortex-M3 -w-410				\
+ 		  $(INC)
+
+LFLAGS 		= --cpu=Cortex-M3 					\
+		  --no_library_search					\
+		  --entry bsp_image_base				\
+		  --silent
+
+CFLAGS 		= --cpu=Cortex-M3 -e --silent --endian little -Ohs	\
+		  --no_path_in_file_macros 				\
+		  --no_mem_idioms					\
+		  --no_unaligned_access 				\
+		  -DDBG_ENABLE=$(GLB_DEBUG)				\
+		  -DWIN_ENABLE=$(GLB_WINADR)				\
+		  -DWIN_LOWADR=$(GLB_WINLOW)				\
+		  -DWIN_UPPADR=$(GLB_WINHIGH)				\
+		  $(INC)
+#_________________________________________________________________________________________
+#
+# Команды компиляции
+#
+define	do_as
+	@echo $(MSG_AS) $<
+	$(TX) $< $(basename $<).s79 -a -c -t -l@@
+	$(AS) $(AFLAGS) $(basename $<).s79 -o $@ -l $(TMP)\$(basename $(notdir $<)).lst
+	$(RM) /q $(basename $<).s79
+endef
+
+define	do_cc
+	@echo $(MSG_CC) $<
+	$(CC) $< -o $@ $(CFLAGS) -lC $(TMP)\$(basename $(notdir $<)).lst
+endef
+
+define	do_cl
+	@echo $(MSG_CC) $<
+	$(CC) $< -o $@ $(CFLAGS) -lC $(TMP)\$(basename $(notdir $<)).lst
+endef
+
+define	do_inc
+	@echo $(MSG_TX) $<
+	$(TX) $< $(TMP)\$(basename $(notdir $<)).inc -c -t
+endef
+
+#_________________________________________________________________________________________
+#
+all:		a205_iar.hex
+OBJS		= $(TMP)\a205.r79                  		\
+		  $(TMP)\c205.r79 	           		\
+		  $(TMP)\main.r79				\
+		  $(TMP)\debug.r79
+
+HDRS		= c205.h					\
+		  debug.h					\
+		  ioport.h
+
+LIBS		= $(TOOL_LIB)
+
+#_________________________________________________________________________________________
+#
+# ВНИМАНИЕ: Регионы RAM и AHB не должны пересекать границу 0x2001C000
+# (должны целиком располагаться выше или ниже этой границы)
+#
+a205_iar.hex:	$(OBJS) $(LIBS) $(HDRS)
+	@echo	define memory LINEAR with size = 4G;					>  $(TMP)\l205.icf
+	@echo 	define region ROM  = LINEAR:[from 0x08004000 to 0x08007FFF];		>> $(TMP)\l205.icf
+	@echo 	define region RAM  = LINEAR:[from 0x20000000 to 0x2000BFFF];		>> $(TMP)\l205.icf
+	@echo 	define region AHB  = LINEAR:[from 0x2001C000 to 0x2001FFFF];		>> $(TMP)\l205.icf
+	@echo 	define region RTC  = LINEAR:[from 0x40024000 to 0x40024FFF];		>> $(TMP)\l205.icf
+	@echo	place at address LINEAR: 0x08004000 {section IHAL};			>> $(TMP)\l205.icf
+	@echo	place in ROM  {ro};							>> $(TMP)\l205.icf
+	@echo 	place in RAM  {rw};							>> $(TMP)\l205.icf
+	@echo 	place in AHB  {rw data section DATA_MAC, rw data section DATA_USB};     >> $(TMP)\l205.icf
+	@echo 	place in RTC  {rw data section DATA_RTC};   				>> $(TMP)\l205.icf
+	@echo 	initialize by copy {rw};						>> $(TMP)\l205.icf
+	@echo 	do not initialize  {section .noinit};					>> $(TMP)\l205.icf
+	@echo 	do not initialize  {section THREAD_STACK};				>> $(TMP)\l205.icf
+	@echo 	do not initialize  {section HANDLER_STACK};				>> $(TMP)\l205.icf
+	@echo 	do not initialize  {section DATA_RTC};					>> $(TMP)\l205.icf
+	@echo	$(MSG_LD) a205.hex
+	$(LD) 	$(LFLAGS) $(OBJS) $(LIBS) -o $(TMP)\a205.elf --map $(TMP)\m205.map --config $(TMP)\l205.icf
+	$(IELF) $(TMP)\a205.elf $(TMP)\a205.hex --ihex --silent
+	$(SREC) $(TMP)\a205.hex -Intel -offset -0x08004000 -o $(TMP)\a205.bin -Binary
+	$(SREC) $(TMP)\a205.bin -Binary -o a205_iar.hex -Intel
+	$(SREC) a205_iar.hex -Intel rom\134.hex -Intel -offset -0x4000 -o a205_134.hex -Intel
+	$(SREC) a205_iar.hex -Intel rom\bk0011m.hex -Intel -offset -0x4000 -o a205_iar11m.hex -Intel
+	$(SREC) a205_iar.hex -Intel rom\bk0011.hex -Intel -offset -0x4000 -o a205_iar11.hex -Intel
+	$(SREC) a205_iar.hex -Intel rom\bk0010.hex -Intel -offset -0x4000 -o a205_iar10.hex -Intel
+	$(SREC) a205_iar.hex -Intel rom\empty.hex -Intel -offset -0x4000 -o a205_empty.hex -Intel
+#_________________________________________________________________________________________
+#
+$(TMP)\a205.r79:	a205.a79	$(HDRS)		; $(do_as)
+$(TMP)\c205.r79:	c205.c		$(HDRS)		; $(do_cc)
+$(TMP)\main.r79:	main.c		$(HDRS)		; $(do_cc)
+$(TMP)\debug.r79:	debug.c		$(HDRS)		; $(do_cc)
+

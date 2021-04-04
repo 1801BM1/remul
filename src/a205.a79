@@ -1,0 +1,528 @@
+//
+//  Project:         RE-mulator (1801PE2/PP1 emulator)
+//  File:            a205.a79
+//  Author:          VSO
+//
+//  Compiled Using:  CodeSourcery GCC 4.7.2
+//                   GNU Tools ARM Embedded. ver. 4.7 2012q4
+//                   IAR ICC 5.41.2
+//
+//  Processor:       STM32F205
+//  Board:           RE-mulator 1801PE2/PP1
+//_____________________________________________________________________________
+//
+#ifdef __IASMARM__
+#pragma language=extended
+#if (((__TID__ >> 8) & 0x7F) != 79)
+#error This file should only be compiled by ARM-compiler
+#endif
+
+#define _title          name
+#define _ltorg          ltorg
+#define _data           data
+#define _thumb          thumb
+#define _global         public
+#define _extern         extern
+#define _thumb_func
+#define _end            end
+#define _space          ds8
+#define _sect(sname, txtiar, txtgcc, falign)    section sname:txtiar(falign)
+#define _align          alignram
+#define _alignram       alignram
+#define _alignrom       alignrom
+#define _byte           dc8
+#define _word           dc32
+#define _rept           REPT
+#endif
+
+//_____________________________________________________________________________
+//
+#ifdef __GNUC__
+
+#define _title          .title
+#define _ltorg          .ltorg
+#define _data
+#define _thumb          .thumb
+#define _global         .global
+#define _extern         .extern
+#define _thumb_func     .thumb_func
+#define _end            .end
+#define _space          .space
+#define _sect(sname, txtiar, txtgcc, falign) .section   sname, txtgcc
+#define _align          .align
+#define _alignram       .align
+#define _alignrom       .align
+#define _byte           .byte
+#define _word           .word
+#define _rept           .rept
+#define ENDR            .endr
+
+                .syntax unified
+#endif
+                _title  "io_a205"
+//_____________________________________________________________________________
+//
+// Используется два отдельных стека - MSP и PSP, настроим отдельно
+//
+// Определение размеров стека (в 32-битных словах)
+//
+// Размер стартового стека в словах, стартовый стек используется
+// после аппаратного сброса при загрузке операционной системы
+//
+#define BSP_STARTUP_STACK_SIZE          256
+//
+// Размер стека прерываний IRQ в словах, стек прерываний используется
+// постоянно при работе изделия. Если предполагается значительная
+// глубина вложенных прерываний, то размер стека следует увеличить
+//
+// В проекте РЕ-мулятора прерывания не используются, тем не менее
+// в процессе отладки могут происходить исключения, поэтому этот
+// стек все равно нужен
+//
+#define BSP_IRQ_STACK_SIZE              128
+                                                                //
+                _sect(THREAD_STACK, DATA, "", 3)                // стек потока/процесса
+                _space  4*BSP_STARTUP_STACK_SIZE                //
+                _global thread_mode_stack                       //
+thread_mode_stack:                                              //
+                                                                //
+                _sect(HANDLER_STACK, DATA, "", 3)               // main stack, используется
+                _space  4*BSP_IRQ_STACK_SIZE                    //
+                _global handler_mode_stack                      // для обработки прерываний
+handler_mode_stack:                                             // и исключений
+                                                                //
+//_____________________________________________________________________________
+//
+                                                                // специальная секция для
+                _sect(IHAL, CODE, "ax", 3)                      // привязки к области таблицы
+                _data                                           // векторов и расположения
+                                                                // по начальному адресу
+                _global bsp_image_base                          //
+                _global bsp_vector_table                        //
+                                                                //
+bsp_vector_table:                                               //
+bsp_image_base:                                                 //
+                _word   handler_mode_stack                      // указатель стека
+                _word   bsp_reset_handler                       // точка входа аппаратного сброса
+                                                                //
+                _word   bsp_thunk_handler                       // NMI
+                _word   bsp_thunk_handler                       // Hard fault
+                _word   bsp_thunk_handler                       // Memory Management fault
+                _word   bsp_thunk_handler                       // Bus fault
+                _word   bsp_thunk_handler                       // Usage fault
+                _word   bsp_thunk_handler                       //
+                _word   bsp_thunk_handler                       //
+                _word   bsp_thunk_handler                       //
+                _word   bsp_thunk_handler                       //
+                _word   bsp_thunk_handler                       // SuperVisor Call
+                _word   bsp_thunk_handler                       // Debug Monitor
+                _word   bsp_thunk_handler                       //
+                _word   bsp_thunk_handler                       // Pending SuperVisor
+                _word   bsp_thunk_handler                       // System Tick
+//
+// Таблица прерываний фактически не используется - все запрещены
+//
+                _rept   128-16                                  // полностью заполним
+                _word   bsp_thunk_handler                       // таблицу прерываний
+                ENDR                                            //
+                                                                //
+//_____________________________________________________________________________
+//
+                _extern bsp_default_handler                     //
+                _global bsp_thunk_handler                       //
+                _thumb                                          //
+                _thumb_func                                     //
+                                                                //
+bsp_thunk_handler:                                              //
+                tst     LR, #0x04                               // exception comes from handler mode
+                beq     @@SkipCopy                              // just add the new frame data
+                                                                //
+                mrs     R0, PSP                                 //
+                add     R0, R0, #16                             // copy the data from process stack
+                ldmfd   R0, {R1-R3, R12}                        //
+                push    {R1-R3, R12}                            //
+                mrs     R0, PSP                                 //
+                ldmfd   R0, {R1-R3, R12}                        //
+                push    {R1-R3, R12}                            //
+                                                                //
+@@SkipCopy:                                                     //
+                push    {R0}                                    // stack alignment
+                push    {LR}                                    //
+                mrs     R1, MSP                                 //
+                mrs     R0, PSP                                 //
+                push    {R0-R1}                                 //
+                push    {R4-R11}                                //
+                mov     R0, SP                                  //
+                bl      bsp_default_handler                     //
+                b       .                                       //
+                                                                //
+//_____________________________________________________________________________
+//
+// Процедура реализации алгоритма работы ROM 1801РЕ2
+//  - не осуществляет возврат (работает постоянно)
+//  - выполняется с запрещенными прерываниями (не используются)
+//  - код позиционно-независимый - работает перемещенным в RAM
+//
+// Входные параметры:
+//   R0 - адрес таблицы ссылок на банки ROM
+//   R1 - адрес порта шины данных
+//   R2 - адрес порта сигналов управления
+//
+#define PIO_IDR         0x10                    // смещение регистра входных данных
+#define PIO_ODR         0x14                    // смещение регистра выходных данных
+#define PIO_BSR         0x18                    // смещение регситра сброса и установки
+                                                //
+#define RPLY_BIT        0                       //
+#define SYNC_BIT        3                       //
+#define DIN_BIT         13                      //
+#define SEL0_BIT        9                       //
+#define SEL1_BIT        4                       //
+#define SEL2_BIT        5                       //
+#define SEL3_BIT        7                       //
+                                                //
+#define RPLY_MSK        (1<<RPLY_BIT)           //
+#define SYNC_MSK        (1<<SYNC_BIT)           //
+#define DIN_MSK         (1<<DIN_BIT)            //
+#define SEL0_MSK        (1<<SEL0_BIT)           //
+#define SEL1_MSK        (1<<SEL1_BIT)           //
+#define SEL2_MSK        (1<<SEL2_BIT)           //
+#define SEL3_MSK        (1<<SEL3_BIT)           //
+#define SELX_MSK        ((1<<SEL0_BIT) | (1<<SEL1_BIT) | (1<<SEL2_BIT) | (1<<SEL3_BIT))
+
+                _sect(.text, CODE, "ax", 2)                     //
+                _global app_rom_loop                            //
+                _global app_end_loop                            //
+                _thumb                                          //
+                _thumb_func                                     //
+                                                                //
+app_rom_loop:   mov     R12, R0                                 // R12 - таблица ссылок
+                movs    R5, #RPLY_MSK                           // вспомогательная константа
+//
+// Для начала цикла ожидаем высокий уровень SYNC (неактивный)
+//
+@@SyncHigh:     ldr     R0, [R2, #PIO_IDR]                      // загружаем управляющие
+                movs    R0, R0, lsr #(SYNC_BIT+1)               // сигналы и проверяем
+                bcc.n   @@SyncHigh                              // сигнал SYNC
+//
+// Теперь ожидаем низкий уровень SYNC (ниспадающий фронт)
+//
+@@SyncFall:     ldr     R7, [R1, #PIO_IDR]                      // R7 предполагаемый адрес
+                ldr     R4, [R2, #PIO_IDR]                      // для предварительной фиксации
+                movs    R0, R4, lsr #(SYNC_BIT+1)               //
+                bcs.n   @@SyncFall                              //
+//
+// Выполняем подготовку обращения к таблице ссылок
+// Выделяем старшие три бита chipcode и вычисляем
+// элемент таблицы
+//
+                movs    R0, R7, lsr #13                         // в R6 указатель на элемент
+                add     R6, R12, R0, lsl #8                     // таблицы соответствующей
+                ubfx    R7, R7, #1, #12                         // зафиксированному chipcode
+                movs    R7, R7, lsl #1                          //
+//
+// Обнаружен ниспадающий фронт SYNC, теперь будем проверять
+// устойчивой комбинации SYNC=0, DIN=0, и некоторых активных
+// сигналов выборки
+//
+// Как оказалось если в качестве сигнала CS используется выход
+// с микросхем 1801ВП1 (в частности -037) то к моменту ниспадающего
+// SYNC матрица еще не успевает декодировать адрес и РЕ-мулятор
+// не получает устойчивой комбинации сигналов на входе. Поэтому
+// выполняем ожидание
+//
+@@WaitSel:      ldr     R4, [R2, #PIO_IDR]                      // загружаем управляющие
+                movs    R0, R4, lsr #(SYNC_BIT+1)               // сигналы и проверяем
+                bcs.n   @@SyncFall                              // сигнал SYNC
+                movs    R0, R4, lsr #(DIN_BIT+1)                // проверим активность
+                bcs.n   @@WaitSel                               // сигнала DIN
+                ubfx    R0, R4, #SEL1_BIT, #6                   //
+                ldr     R3, [R6, R0, lsl #2]                    //
+                tst     R3, R3                                  // при данной комбинации
+                beq.n   @@WaitSel                               // нет доступа к ROM
+//
+// Более быстрый вариант, но требует чтобы комбинация CS была
+// устойчивой в момент ниспадающего SYNC
+//
+//              ubfx    R0, R4, #SEL1_BIT, #6                   //
+//              ldr     R3, [R6, R0, lsl #2]                    //
+//              tst     R3, R3                                  // при данной комбинации
+//              beq.n   @@SyncHigh                              // нет доступа к ROM
+//								//
+#if WIN_ENABLE							//
+//
+// Работа в ограниченном окне. Приводит к некоторому снижению
+// быстродействия, но позволяет программными средствами организовать
+// дополнительный дешифратор адреса
+//
+		cmp	R7, #(0x2000 - WIN_UPPADR)		// адрес инвертирован
+		blo	@@SyncHigh				// поэтому вычитаем из 8К
+		cmp	R7, #(0x2000 - WIN_LOWADR)		// 
+		bhs	@@SyncHigh				//
+#endif								//
+                ldrh    R0, [R3, R7]                            // выполняем загрузку
+								// данных из массива
+@@WaitDin:	ldr     R4, [R2, #PIO_IDR]			// теперь ждем активного DIN
+                movs    R3, R4, lsr #(DIN_BIT+1)		//
+		ittt	cc					//
+                movcc   R4, R5, lsl #16                         //
+                strcc   R4, [R2, #PIO_BSR]                      // активируем сигнал RPLY
+                strcc   R0, [R1, #PIO_ODR]                      // выводим данные на шину
+		bcc.n	@@SetupWait				//
+                movs    R3, R4, lsr #(SYNC_BIT+1)		//
+                bcc.n   @@WaitDin				//
+                b.n	@@SyncFall				//
+								//
+@@SetupWait:    movs    R3, #0xFFFFFFFF                         //
+                movs    R3, R3, lsr #16                         //
+								//
+@@WaitDone:     ldr     R0,  [R2, #PIO_IDR]                     // проверим активность DIN
+                movs    R4, R0, lsr #(DIN_BIT+1)                // как только DIN неактивен
+		bcc.n	@@WaitDone				// сразу снимаем RPLY и
+                str	R5, [R2, #PIO_BSR]                      // освобождаем шину
+                strh	R3, [R1, #PIO_ODR]                      //
+		b.n	@@SyncHigh				//
+                                                                //
+app_end_loop:                                                   //
+                                                                //
+//_____________________________________________________________________________
+//
+                _extern io_startup                              //
+                _global bsp_reset_handler                       //
+                _thumb                                          //
+                _thumb_func                                     //
+                                                                //
+bsp_reset_handler:                                              //
+                cpsid   I                                       //
+                ldr     R0, =handler_mode_stack                 //
+                msr     MSP, R0                                 //
+                ldr     R0, =thread_mode_stack                  //
+                msr     PSP, R0                                 //
+                mov     R0, #0x02                               // привилегированный режим
+                msr     CONTROL, R0                             // использование PSP
+                isb                                             //
+                ldr     R0, =io_startup                         //
+                mov     PC, R0                                  //
+                _ltorg                                          //
+                                                                //
+//_____________________________________________________________________________
+//
+//  void* bsp_memchr(const void* s, int c, unsigned int n)
+//
+                _sect(.text_bsp_memchr, CODE, "ax", 4)          //
+                _alignrom 4                                     //
+                _global bsp_memchr                              //
+                _thumb                                          //
+                _thumb_func                                     //
+                                                                // R0 - буфер
+bsp_memchr:     cbz     R2, @@Zero                              // R1 - модель
+                subs    R0, R0, #1                              // R2 - длина
+@@Loop:         ldrb    R3, [R0, #1]!                           //
+                cmp     R3, R1                                  //
+                beq     @@Exit                                  //
+                subs    R2, R2, #1                              //
+                bne     @@Loop                                  //
+@@Zero:         movs    R0, #0                                  //
+@@Exit:         bx      LR                                      //
+                                                                //
+//_____________________________________________________________________________
+//
+//  void* bsp_memset(void* d, int c, unsigned int n)
+//
+// Специальная ускоренная версия:
+//      - сначала записывает байтами до выравнивания на границу
+//      - потом заполняет область целыми словами
+//      - в конце дозаполняет невыравненную область байтами
+//
+                _sect(.text_bsp_memset, CODE, "ax", 4)          //
+                _alignrom 4                                     //
+                _global bsp_memset                              //
+                _thumb                                          //
+                _thumb_func                                     //
+                                                                //
+bsp_memset:     mov     R12, R0                                 // R0 - dest
+                cbz     R2, @@Exit                              // R1 - c
+                                                                // R2 - count
+                                                                //
+@@Before:       tst     R0, #0x03                               //
+                beq     @@Main                                  //
+                strb    R1, [R0], #1                            //
+                subs    R2, R2, #1                              //
+                bne     @@Before                                //
+                bx      LR                                      //
+                                                                //
+@@Main:         and     R1, R1, #0xFF                           //
+                orr     R1, R1, R1, lsl #8                      //
+                orr     R1, R1, R1, lsl #16                     //
+                                                                //
+@@Loop:         subs    R2, R2, #4                              //
+                it      cs                                      //
+                strcs   R1, [R0], #4                            // count >= 0
+                bhi     @@Loop                                  // count > 0
+                beq     @@Exit                                  //
+                                                                //
+                adds    R2, R2, #4                              //
+                strb    R1, [R0], #1                            //
+                subs    R2, R2, #1                              //
+                beq     @@Exit                                  //
+                strb    R1, [R0], #1                            //
+                subs    R2, R2, #1                              //
+                beq     @@Exit                                  //
+                strb    R1, [R0]                                //
+@@Exit:         mov     R0, R12                                 //
+                bx      LR                                      //
+//_____________________________________________________________________________
+//
+//  void* bsp_memcpy(void* d, const void* s, unsigned int n)
+//
+                _sect(.text_bsp_memcpy, CODE, "ax", 4)          //
+                _alignrom 4                                     //
+                _global bsp_memcpy                              //
+                _thumb                                          //
+                _thumb_func                                     //
+                                                                 // R0 - dest
+bsp_memcpy:     cbz     R2, @@Exit                              // R1 - src
+                mov     R12, R0                                 // R2 - count
+                                                                //
+                subs    R3, R0, R1                              // указатели взаимно
+                tst     R3, #3                                  // невыравнены - выравняем
+                bne     @@Asource                               // только по источнику
+                                                                //
+                cmp     R2, #7                                  // для коротких пересылок
+                ble     @@ByteLoop                              // оптимизация беполезна
+                                                                //
+                ands    R3, R1, #3                              // сразу выравнено на
+                beq     @@WordLoop                              // двойное слово
+                                                                //
+                ldrb    R3, [R1], #1                            // копируем один байт
+                strb    R3, [R12], #1                           //
+                subs    R2, R2, #1                              //
+                beq     @@Exit                                  //
+                ands    R3, R1, #3                              //
+                beq     @@WordLoop                              //
+                                                                //
+                ldrb    R3, [R1], #1                            // копируем два байта
+                strb    R3, [R12], #1                           //
+                subs    R2, R2, #1                              //
+                beq     @@Exit                                  //
+                ands    R3, R1, #3                              //
+                beq     @@WordLoop                              //
+                                                                //
+                ldrb    R3, [R1], #1                            // копируем три байта
+                strb    R3, [R12], #1                           //
+                subs    R2, R2, #1                              //
+                beq     @@Exit                                  //
+                                                                //
+@@WordLoop:     ldr     R3, [R1], #4                            //
+                subs    R2, R2, #4                              //
+                it      cs                                      //
+                strcs   R3, [R12], #4                           // count >= 0
+                bhi     @@WordLoop                              // count > 0
+                beq     @@Exit                                  //
+                                                                //
+                adds    R2, R2, #4                              // избегаем проблем
+                subs    R1, R1, #4                              // связанных с endianess
+                                                                // и копируем побайтно
+@@ByteLoop:     ldrb    R3, [R1],  #1                           //
+                strb    R3, [R12], #1                           //
+                subs    R2, R2, #1                              //
+                bne     @@ByteLoop                              //
+@@Exit:         bx      LR                                      // вариант копирования
+                                                                // с выравниванием по источнику
+@@Asource:      tst     R1, #1                                  // адрес не выровнен
+                beq     @@SkipB                                 // даже на полуслово
+                ldrb    R3, [R1],  #1                           //
+                strb    R3, [R12], #1                           // был только один байт
+                subs    R2, R2, #1                              //
+                beq     @@Exit                                  //
+                                                                //
+@@SkipB:        tst     R1, #2                                  // адрес уже выровнен
+                beq     @@SkipW                                 // минимум на полуслово
+                ldrh    R3, [R1],  #2                           //
+                strb    R3, [R12], #1                           // был только один байт
+                subs    R2, R2, #1                              //
+                beq     @@Exit                                  //
+                movs    R3, R3, lsr #8                          // сохранили необходимое
+                strb    R3, [R12], #1                           // количество байтов
+                subs    R2, R2, #1                              //
+                beq     @@Exit                                  //
+                                                                //
+@@SkipW:        subs    R2, R2, #4                              // убедимся что имеется
+                blo     @@Tail                                  // целое слово хотя бы
+                tst     R12, #3                                 // для одного цикла
+                beq     @@Loop                                  //
+                tst     R12, #1                                 //
+                beq     @@LoopW                                 //
+                b       @@LoopB                                 //
+                                                                //
+                _alignrom 4                                     //
+@@LoopB:        ldr     R3, [R1], #4                            //
+                strb    R3, [R12], #1                           // приемный буфер не
+                movs    R3, R3, lsr #8                          // выравнен совсем
+                strh    R3, [R12], #2                           // копируем байтами
+                movs    R3, R3, lsr #16                         //
+                strb    R3, [R12], #1                           //
+                subs    R2, R2, #4                              //
+                bcs     @@LoopB                                 //
+                b       @@Tail                                  //
+                                                                //
+                _alignrom 4                                     //
+@@LoopW:        ldr     R3, [R1], #4                            //
+                strh    R3, [R12], #2                           // приемный буфер не
+                movs    R3, R3, lsr #16                         // выравнен на слово
+                strh    R3, [R12], #2                           // копируем полусловами
+                subs    R2, R2, #4                              //
+                bcs     @@LoopW                                 //
+                b       @@Tail                                  //
+                                                                //
+                _alignrom 4                                     //
+@@Loop:         ldr     R3, [R1], #4                            //
+                str     R3, [R12], #4                           //
+                subs    R2, R2, #4                              //
+                bcs     @@Loop                                  //
+                                                                //
+@@Tail:         adds    R2, R2, #4                              //
+                beq     @@Exit                                  //
+                tst     R2, #2                                  // R2 - 0..3
+                beq     @@SkipT                                 //
+                ldrh    R3, [R1], #2                            //
+                strb    R3, [R12], #1                           //
+                movs    R3, R3, lsr #8                          //
+                strb    R3, [R12], #1                           //
+                                                                //
+@@SkipT:        tst     R2, #1                                  //
+                itt     ne                                      //
+                ldrbne  R3, [R1]                                //
+                strbne  R3, [R12]                               //
+                bx      LR                                      //
+//_____________________________________________________________________________
+//
+//  unsigned int bsp_strlen(const char *s)
+//
+                _sect(.text_bsp_strlen, CODE, "ax", 4)          //
+                _alignrom 4                                     //
+                _global bsp_strlen                              //
+                _thumb                                          //
+                _thumb_func                                     //
+                                                                //
+bsp_strlen:     subs    R1, R0, #1                              // R0 - строка
+@@Loop:         ldrb    R2, [R1, #1]!                           //
+                tst     R2, R2                                  //
+                bne     @@Loop                                  //
+                subs    R0, R1, R0                              //
+                bx      LR                                      //
+
+//________________________________________________________________
+//
+// Функция считывания PSR
+//
+#ifdef __IASMARM__
+                _global __get_PSR                               //
+                _thumb                                          //
+                _thumb_func                                     //
+                                                                //
+__get_PSR:      mrs     R0, PSR                                 //
+                bx      lr                                      //
+#endif                                                          //
+//_____________________________________________________________________________
+//
+                _end                                            //

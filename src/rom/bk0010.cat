@@ -1,0 +1,42 @@
+#
+# Файл конфигурации массивов прошивок для БК-0010
+#
+#_______________________________________________________________________________
+#
+# Конфигурация 0 (сняты все перемычки SA1-SA5)
+# Штатная конфигурация системной платы БК-0010
+# Установка модуля РЕ-мулятора на место DS17
+#
+#  017 - 03 - CS  - 101 (вывод 23 колодки DS17)
+#  106 - 02 - CS1 - 53 (вывод 23 DS18 или DS20)
+#  107 - 01 - CS1
+#  108 - 00 - CS2 - 46 (вывод 1 DS19)
+# 
+#_______________________________________________________________________________
+#
+# Конфигурация 1 (установлена только перемычка SA1)
+# Конфигурация системной платы БК-0010 с подключенным МСТД/Фокал
+# Установка модуля РЕ-мулятора на место DS17
+#
+#  017 - 03 - CS  - 101 (вывод 23 колодки DS17)
+#  018 - 02 - CS1 - 53 (вывод 23 DS18 или DS20)
+#  019 - 00 - CS2 - 46 (вывод 1 DS19)
+#
+#_______________________________________________________________________________
+#
+017_bk0010.rom  -Binary -offset 0x08000
+106_bk0010.rom  -Binary -offset 0x0A010
+107_bk0010.rom  -Binary -offset 0x0C020
+108_bk0010.rom  -Binary -offset 0x0E030
+018_bk0010.rom  -Binary -offset 0x10040
+019_bk0010.rom  -Binary -offset 0x12050
+
+-generate 0x0A002 0x0A010 -repeat-string %00%00%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF
+-generate 0x0C012 0x0C020 -repeat-string %11%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF
+-generate 0x0E022 0x0E030 -repeat-string %11%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF
+-generate 0x10032 0x10040 -repeat-string %22%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF
+-generate 0x12042 0x12050 -repeat-string %FF%11%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF
+-generate 0x14052 0x14060 -repeat-string %FF%22%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF
+
+-o bk0010.hex -Intel -obs=64
+ 

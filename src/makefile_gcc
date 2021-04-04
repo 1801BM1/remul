@@ -1,0 +1,213 @@
+#_________________________________________________________________________________________
+#
+# Для строчных переменных которые далее будут конкатенированы не допускается 
+# использование комментария после определения - это добавляет разделитель после строки
+#
+# Для построения проекта с отладкой:  GLB_DEBUG = 1
+# Для построения проекта без отладки: GLB_DEBUG = 0
+#
+# Добавлена возможность ответа РЕ-мулятора не на все 8К адресного диапазона микросхемы
+# а на определенное окно, ограниченное константами GLB_WINLOW и GLB_WINHIGH, при этом
+# константа GLB_WINADR должна иметь ненулевое значение
+#
+# Пример для работы в окне 173000..1733777, следует отвечать в интервале адресов
+# 13000..13777 (0x1600..0x1800), используется для создания ПЗУ с образом dwboot.bin
+#
+# GLB_WINADR	= 1
+# GLB_WINLOW    = 0x1600
+# GLB_WINGIGH   = 0x1800
+#
+SHELL		= cmd.exe
+GLB_DEBUG	= 0
+GLB_WINADR	= 0
+GLB_WINLOW    	= 0x1600
+GLB_WINGIGH   	= 0x1800
+
+ifeq ($(GLB_DEBUG), 0)
+TMP             = .\tmp_gcc\release
+else
+TMP             = .\tmp_gcc\debug
+endif
+
+#_________________________________________________________________________________________
+#
+# Различные сообщения
+#
+MSG_AS		= as:
+MSG_CC		= cc:
+MSG_LD		= ld:
+MSG_LB		= lb:
+MSG_CD		= cd:
+MSG_TX		= tx:
+MSG_HT		= ht:
+
+#_________________________________________________________________________________________
+#
+# Пути к используемым инструментам (следует установить на фактические)
+#
+UTIL_PATH	= D:\ECC\UTIL
+TOOL_PATH	= D:\ECC\GNU\ARM472
+TOOL_LIB	= $(TOOL_PATH)\lib\gcc\arm-none-eabi\4.7.3\armv7-m\libgcc.a
+TOOL_PATH_INC	= $(TOOL_PATH)\arm-none-eabi\include
+
+AS		= $(TOOL_PATH)\bin\arm-none-eabi-as.exe
+CP		= $(TOOL_PATH)\bin\arm-none-eabi-cpp.exe
+CC		= $(TOOL_PATH)\bin\arm-none-eabi-gcc
+LD		= $(TOOL_PATH)\bin\arm-none-eabi-ld.exe
+LB		= $(TOOL_PATH)\bin\arm-none-eabi-ar.exe
+OBJC		= $(TOOL_PATH)\bin\arm-none-eabi-objcopy.exe
+RM		= del
+
+TX     		= $(UTIL_PATH)\atxt32.exe
+SREC		= $(UTIL_PATH)\srec_cat.exe
+
+#_________________________________________________________________________________________
+#
+# Общие используемые переменные
+# 
+INC	= -I$(TOOL_PATH_INC)
+
+AFLAGS 	= -aghlms						\
+	  -mcpu=cortex-m3					\
+	  -mthumb						\
+	  -mlittle-endian					\
+ 	  $(INC)
+
+CFLAGS 	= $(INC)						\
+	  -c							\
+	  -std=c99						\
+	  -Os							\
+	  -Wa,-a,-ad						\
+	  -ffunction-sections					\
+	  -mcpu=cortex-m3					\
+	  -mthumb						\
+          -mlittle-endian					\
+	  -mno-unaligned-access					\
+	  -nostartfiles						\
+	  -Wchar-subscripts					\
+	  -Wimplicit-int					\
+	  -Wimplicit-function-declaration			\
+	  -Wcomment						\
+	  -Wformat						\
+	  -Wmain						\
+	  -Wmissing-braces					\
+	  -Wnonnull						\
+	  -Wparentheses						\
+	  -Wsequence-point					\
+	  -Wsign-compare					\
+	  -Wswitch						\
+	  -Wreturn-type						\
+	  -Wtrigraphs						\
+	  -Wunknown-pragmas					\
+	  -Wuninitialized					\
+	  -Wunused-label					\
+	  -Wunused-value					\
+	  -Wunused-variable					\
+	  -Wvolatile-register-var				\
+	  -DDBG_ENABLE=$(GLB_DEBUG)				\
+	  -DWIN_ENABLE=$(GLB_WINADR)				\
+	  -DWIN_LOWADR=$(GLB_WINLOW)				\
+	  -DWIN_UPPADR=$(GLB_WINHIGH)
+
+PFLAGS	=
+LFLAGS	= --gc-sections						\
+	  --entry=bsp_image_base
+
+#_________________________________________________________________________________________
+#
+# Команды компиляции
+#
+define	do_as
+	@echo $(MSG_AS) $<
+	$(TX) $< $(TMP)\$(basename $(notdir $<)).s -a -e -t -l@@
+	$(CP) $(TMP)\$(basename	$(notdir $<)).s	-o $(TMP)\$(basename $(notdir $<)).spp $(INC) $(PFLAGS)
+	$(AS) $(AFLAGS)	$(TMP)\$(basename $(notdir $<)).spp -o $@ -ahclms=$(TMP)\$(basename $(notdir $<)).lst
+endef
+
+define	do_cc
+	@echo $(MSG_CC) $<
+	$(CC) $(CFLAGS)	$< -o $@ -Wa,-alhs=$(TMP)\$(basename $(notdir $<)).lst
+endef
+
+#_________________________________________________________________________________________
+#
+all:		a205_gcc.hex
+OBJS		= $(TMP)\a205.o                  		\
+		  $(TMP)\c205.o 	     	      		\
+		  $(TMP)\main.o 	     	      		\
+		  $(TMP)\debug.o
+
+HDRS		= c205.h					\
+		  debug.h					\
+		  ioport.h
+
+LIBS		= $(TOOL_LIB)
+
+#_________________________________________________________________________________________
+#
+# ВНИМАНИЕ: Регионы RAM и AHB не должны пересекать границу 0x2001C000
+# (должны целиком располагаться выше или ниже этой границы)
+#
+a205_gcc.hex:	$(OBJS) $(LIBS) $(HDRS)
+	@echo	MEMORY							>  $(TMP)\l205.ld
+	@echo	{							>> $(TMP)\l205.ld
+	@echo	  ROM (rx) : ORIGIN = 0x08004000, LENGTH = 16K		>> $(TMP)\l205.ld
+	@echo	  RAM (rw) : ORIGIN = 0x20000000, LENGTH = 48K		>> $(TMP)\l205.ld
+	@echo	  AHB (rw) : ORIGIN = 0x2001C000, LENGTH = 16K		>> $(TMP)\l205.ld
+	@echo	  RTC (rw) : ORIGIN = 0x40024000, LENGTH = 4K		>> $(TMP)\l205.ld
+	@echo	}							>> $(TMP)\l205.ld
+	@echo	SECTIONS						>> $(TMP)\l205.ld
+	@echo	{							>> $(TMP)\l205.ld
+	@echo	  .text :						>> $(TMP)\l205.ld
+	@echo	  {							>> $(TMP)\l205.ld
+	@echo	    *(IHAL)						>> $(TMP)\l205.ld
+	@echo	    *(.text .text.* .gnu.linkonce.t.*)			>> $(TMP)\l205.ld
+	@echo	    *(.gnu.warning)					>> $(TMP)\l205.ld
+	@echo	    *(.rodata .rodata.* .gnu.linkonce.r.*)		>> $(TMP)\l205.ld
+	@echo	    *(XHAL)						>> $(TMP)\l205.ld
+	@echo	  } ^> ROM						>> $(TMP)\l205.ld
+	@echo	  . = ALIGN(4);						>> $(TMP)\l205.ld
+	@echo	  __data_init__ = . ;					>> $(TMP)\l205.ld
+	@echo	  .data : AT (__data_init__)				>> $(TMP)\l205.ld
+	@echo	  {							>> $(TMP)\l205.ld
+	@echo	    __data_start__ = .;					>> $(TMP)\l205.ld
+	@echo	    *(.data)						>> $(TMP)\l205.ld
+	@echo	    *(.data.*)						>> $(TMP)\l205.ld
+	@echo	    __data_end__ = . ;					>> $(TMP)\l205.ld
+	@echo	  } ^> RAM						>> $(TMP)\l205.ld
+	@echo	  .bss (NOLOAD) :					>> $(TMP)\l205.ld
+	@echo	  {							>> $(TMP)\l205.ld
+	@echo	     __bss_start__ = . ;				>> $(TMP)\l205.ld
+	@echo	     *(.bss)						>> $(TMP)\l205.ld
+	@echo	     *(.bss.*)						>> $(TMP)\l205.ld
+	@echo	     . = ALIGN(4);					>> $(TMP)\l205.ld
+	@echo	     *(COMMON)						>> $(TMP)\l205.ld
+	@echo	     __bss_end__ = . ;					>> $(TMP)\l205.ld
+	@echo	  } ^> RAM						>> $(TMP)\l205.ld
+	@echo	  .no_init (NOLOAD) :					>> $(TMP)\l205.ld
+	@echo	  {							>> $(TMP)\l205.ld
+	@echo	     *(NO_INIT)						>> $(TMP)\l205.ld
+	@echo	     . = ALIGN(3);					>> $(TMP)\l205.ld
+	@echo	     *(HANDLER_STACK)					>> $(TMP)\l205.ld
+	@echo	     . = ALIGN(3);					>> $(TMP)\l205.ld
+	@echo	     *(THREAD_STACK)					>> $(TMP)\l205.ld
+	@echo	     __stack_end__ = . ;				>> $(TMP)\l205.ld
+	@echo	  } ^> RAM						>> $(TMP)\l205.ld
+	@echo	}							>> $(TMP)\l205.ld
+	@echo	$(MSG_LD) a205.hex
+	$(LD) 	$(LFLAGS) $(OBJS) $(LIBS) -o $(TMP)\a205.elf -Map $(TMP)\m205.map -T $(TMP)\l205.ld
+	$(OBJC)	$(TMP)\a205.elf $(TMP)\a205.hex --gap-fill 255 -O ihex
+	$(SREC) $(TMP)\a205.hex -Intel -offset -0x08004000 -o a205_gcc.hex -Intel
+	$(SREC) a205_gcc.hex -Intel rom\bk0011m.hex -Intel -offset -0x4000 -o a205_gcc11m.hex -Intel
+	$(SREC) a205_gcc.hex -Intel rom\bk0011.hex  -Intel -offset -0x4000 -o a205_gcc11.hex -Intel
+	$(SREC) a205_gcc.hex -Intel rom\bk0010.hex  -Intel -offset -0x4000 -o a205_gcc10.hex -Intel
+	$(SREC) rom\b205.hex -Intel a205_gcc11m.hex -Intel -offset 0x4000 -o a205_gcc11m_jtag.hex -Intel
+	$(SREC) rom\b205.hex -Intel a205_gcc11.hex  -Intel -offset 0x4000 -o a205_gcc11_jtag.hex -Intel
+	$(SREC) rom\b205.hex -Intel a205_gcc10.hex  -Intel -offset 0x4000 -o a205_gcc10_jtag.hex -Intel
+
+#_________________________________________________________________________________________
+#
+$(TMP)\a205.o:		a205.a79	$(HDRS)		; $(do_as)
+$(TMP)\c205.o:		c205.c		$(HDRS)		; $(do_cc)
+$(TMP)\main.o:		main.c		$(HDRS)		; $(do_cc)
+$(TMP)\debug.o:		debug.c		$(HDRS)		; $(do_cc)

@@ -1,0 +1,9 @@
+#
+# Файл конфигурации с одной пустой ПЗУ с кодом 01 (140000)
+#
+#_______________________________________________________________________________
+#
+-generate 0x08000 0x0A000 -repeat-string %FF
+-generate 0x0A000 0x0A010 -repeat-string %01%03%00%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF%FF
+-o empty.hex -Intel -obs=64
+ 
